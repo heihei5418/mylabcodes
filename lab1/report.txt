@@ -1,0 +1,342 @@
+Lab1 report
+计25班 姚鑫 2012011360
+
+[练习1.1] 操作系统镜像文件 ucore.img 是如何一步一步生成的?(需要比较详细地解释 Makefile 中
+每一条相关命令和命令参数的含义,以及说明命令导致的结果)
+
+首先在Makefile中查找与ucore.img生成相关的代码:
+
+$(UCOREIMG): $(kernel) $(bootblock)
+	$(V)dd if=/dev/zero of=$@ count=10000
+	$(V)dd if=$(bootblock) of=$@ conv=notrunc
+	$(V)dd if=$(kernel) of=$@ seek=1 conv=notrunc
+
+可以看到,为了生成ucore.img,首先要生成kernel和bootblock.
+
+
+先查找与kernel生成相关的代码:
+
+$(kernel): tools/kernel.ld
+
+$(kernel): $(KOBJS)
+	@echo + ld $@
+	$(V)$(LD) $(LDFLAGS) -T tools/kernel.ld -o $@ $(KOBJS)
+	@$(OBJDUMP) -S $@ > $(call asmfile,kernel)
+	@$(OBJDUMP) -t $@ | $(SED) '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(call symfile,kernel)
+
+执行编译kernel的命令,可以在cmd里输出make的过程,可以看到,为了生成kernel,需要:
+kernel.ld init.o readline.o stdio.o kdebug.o kmonitor.o 
+panic.o clock.o console.o intr.o picirq.o trap.o 
+trapentry.o vectors.o pmm.o printfmt.o string.o
+这里的.o文件都是对应的C程序.c文件编译而成.代码为:
+
+$(call add_files_cc,$(call listf_cc,$(KSRCDIR)),kernel,$(KCFLAGS))
+
+实际命令由宏命令批量生成.
+
+
+再来看与bootblock生成相关的代码:
+
+$(bootblock): $(call toobj,$(bootfiles)) | $(call totarget,sign)
+	@echo + ld $@
+	$(V)$(LD) $(LDFLAGS) -N -e start -Ttext 0x7C00 $^ -o $(call toobj,bootblock)
+	@$(OBJDUMP) -S $(call objfile,bootblock) > $(call asmfile,bootblock)
+	@$(OBJDUMP) -t $(call objfile,bootblock) | $(SED) '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(call symfile,bootblock)
+	@$(OBJCOPY) -S -O binary $(call objfile,bootblock) $(call outfile,bootblock)
+	@$(call totarget,sign) $(call outfile,bootblock) $(bootblock)
+
+为了生成bootblock，首先需要生成bootasm.o、bootmain.o、sign
+生成bootasm.o和bootmain.o是由命令:
+
+bootfiles = $(call listf_cc,boot)
+$(foreach f,$(bootfiles),$(call cc_compile,$(f),$(CC),$(CFLAGS) -Os -nostdinc))
+
+实际命令由宏批量生成,bootasm.s生成bootasm.o,bootmain.c生成bootmain.o
+
+生成sign的代码为:
+
+$(call add_files_host,tools/sign.c,sign,sign)
+$(call create_target_host,sign,sign)
+
+
+最终生成ucore.img的时候,生成一个有10000个块的文件，每个块默认512字节，用0填充
+ dd if=/dev/zero of=bin/ucore.img count=10000
+
+把bootblock中的内容写到第一个块
+ dd if=bin/bootblock of=bin/ucore.img conv=notrunc
+
+从第二个块开始写kernel中的内容
+ dd if=bin/kernel of=bin/ucore.img seek=1 conv=notrunc
+
+
+[练习1.2] 一个被系统认为是符合规范的硬盘主引导扇区的特征是什么?
+
+从sign.c的代码来看，一个磁盘主引导扇区只有512字节.且
+第510个（倒数第二个）字节是0x55,
+第511个（倒数第一个）字节是0xAA.
+
+
+[练习2.1] 从 CPU 加电后执行的第一条指令开始,单步跟踪 BIOS 的执行。
+
+参照练习2.3的提示,通过改写Makefile文件  ()
+	debug: $(UCOREIMG)
+		$(V)$(TERMINAL) -e "$(QEMU) -S -s -d in_asm -D $(BINDIR)/q.log -parallel stdio -hda $< -serial null"
+		$(V)sleep 2
+		$(V)$(TERMINAL) -e "gdb -q -tui -x tools/gdbinit"
+在调用qemu时增加-d in_asm -D q.log参数，便可以将运行的汇编指令保存在bin/q.log中。
+为防止qemu在gdb连接后立即开始执行，删除了tools/gdbinit中的"continue"行。
+
+
+[练习2.2] 在初始化位置0x7c00 设置实地址断点,测试断点正常。
+
+在tools/gdbinit结尾加上
+    set architecture i8086  //设置当前调试的CPU是8086
+	b *0x7c00  //在0x7c00处设置断点。此地址是bootloader入口点地址，可看boot/bootasm.S的start地址处
+	c          //continue简称，表示继续执行
+	x /2i $pc  //显示当前eip处的汇编指令
+	set architecture i386  //设置当前调试的CPU是80386
+
+执行make debug,可以在gdb窗口中看到一下结果:
+
+The target architecture is assumed to be i8086
+Breakpoint 2 at 0x7c00
+
+Breakpoint 2, 0x00007c00 in ?? ()
+=> 0x7c00:      cli 
+   0x7c01:      cld    
+The target architecture is assumed to be i386
+
+
+[练习2.3] 在调用qemu 时增加-d in_asm -D q.log 参数，便可以将运行的汇编指令保存在q.log 中。
+将执行的汇编代码与bootasm.S 和 bootblock.asm 进行比较，看看二者是否一致。
+
+在tools/gdbinit结尾加上
+	b *0x7c00
+	c
+	x /10i $pc
+运行make debug,便能在q.log中找到"call maintain"之前执行的汇编指令:
+----------------
+IN: 
+0x00007c00:  cli    
+
+----------------
+IN: 
+0x00007c01:  cld    
+0x00007c02:  xor    %ax,%ax
+0x00007c04:  mov    %ax,%ds
+0x00007c06:  mov    %ax,%es
+0x00007c08:  mov    %ax,%ss
+
+----------------
+IN: 
+0x00007c0a:  in     $0x64,%al
+
+----------------
+IN: 
+0x00007c0c:  test   $0x2,%al
+0x00007c0e:  jne    0x7c0a
+
+----------------
+IN: 
+0x00007c10:  mov    $0xd1,%al
+0x00007c12:  out    %al,$0x64
+0x00007c14:  in     $0x64,%al
+0x00007c16:  test   $0x2,%al
+0x00007c18:  jne    0x7c14
+
+----------------
+IN: 
+0x00007c1a:  mov    $0xdf,%al
+0x00007c1c:  out    %al,$0x60
+0x00007c1e:  lgdtw  0x7c6c
+0x00007c23:  mov    %cr0,%eax
+0x00007c26:  or     $0x1,%eax
+0x00007c2a:  mov    %eax,%cr0
+
+----------------
+IN: 
+0x00007c2d:  ljmp   $0x8,$0x7c32
+
+----------------
+IN: 
+0x00007c32:  mov    $0x10,%ax
+0x00007c36:  mov    %eax,%ds
+
+----------------
+IN: 
+0x00007c38:  mov    %eax,%es
+
+----------------
+IN: 
+0x00007c3a:  mov    %eax,%fs
+0x00007c3c:  mov    %eax,%gs
+0x00007c3e:  mov    %eax,%ss
+
+----------------
+IN: 
+0x00007c40:  mov    $0x0,%ebp
+
+----------------
+IN: 
+0x00007c45:  mov    $0x7c00,%esp
+0x00007c4a:  call   0x7cd1
+
+----------------
+IN: 
+0x00007cd1:  push   %ebp //maintain开始
+
+与bootasm.S和bootblock.asm中的代码相同.
+
+
+[练习3] 分析bootloader 进入保护模式的过程.
+
+bootloader进入保护模式的过程在bootasm.s中实现,分析bootasm.s的代码:
+
+从%cs=0 $pc=0x7c00，进入后
+
+首先清理环境：包括将flag置0和将段寄存器DS,ES,SS置0
+	.code16
+	    cli
+	    cld
+	    xorw %ax, %ax
+	    movw %ax, %ds
+	    movw %ax, %es
+	    movw %ax, %ss
+
+开启A20：通过将键盘控制器上的A20线置于高电位，全部32条地址线可用，
+可以访问4G的内存空间。
+	seta20.1:               # 等待8042键盘控制器不忙
+	    inb $0x64, %al      # 
+	    testb $0x2, %al     #
+	    jnz seta20.1        #
+	
+	    movb $0xd1, %al     # 发送写8042输出端口的指令
+	    outb %al, $0x64     #
+	
+	seta20.1:               # 等待8042键盘控制器不忙
+	    inb $0x64, %al      # 
+	    testb $0x2, %al     #
+	    jnz seta20.1        #
+	
+	    movb $0xdf, %al     # 打开A20
+	    outb %al, $0x60     # 
+
+初始化GDT表：一个简单的GDT表和其描述符已经静态储存在引导区中，载入即可
+	    lgdt gdtdesc
+
+进入保护模式：通过将cr0寄存器PE位置1便开启了保护模式
+	    movl %cr0, %eax
+	    orl $CR0_PE_ON, %eax
+	    movl %eax, %cr0
+
+通过长跳转更新cs的基地址
+	    ljmp $PROT_MODE_CSEG, $protcseg
+	.code32
+	protcseg:
+
+设置保护模式下的段寄存器，并建立堆栈
+	    movw $PROT_MODE_DSEG, %ax
+	    movw %ax, %ds
+	    movw %ax, %es
+	    movw %ax, %fs
+	    movw %ax, %gs
+	    movw %ax, %ss
+	    movl $0x0, %ebp
+	    movl $start, %esp
+
+转到保护模式完成，进入boot主方法
+	    call bootmain
+
+
+[练习4] 分析bootloader加载ELF格式的OS的过程。
+
+bootloader加载ELF格式的OS的过程是bootmain.c实现的,分析其代码:
+
+首先看readsect函数，
+readsect从设备的第secno扇区读取数据到dst位置
+之后的readseg简单包装了readsect，可以从设备读取任意长度的内容。
+
+在bootmain函数中,实现了具体的读取ELF格式文件的过程:
+首先读取ELF头部,通过头部的幻数判断时候为合法的ELF文件,然后将ELF头部的描述表的头地址存在ph中;
+然后按照描述表将ELF文件的数据读入内存,最后根据ELF头部存储的入口信息,找到OS的入口.
+
+
+[练习5] 实现函数调用堆栈跟踪函数
+
+在./kern/kdebug.c文件中补全函数print_stackframe()，然后执行make qemu，可以打印出如下的函数调用关系：
+
+ebp:0x00007b08 eip:0x001009a6 args:0x00010094 0x00000000 0x00007b38 0x00100092 
+    kern/debug/kdebug.c:306: print_stackframe+21
+ebp:0x00007b18 eip:0x00100c95 args:0x00000000 0x00000000 0x00000000 0x00007b88 
+    kern/debug/kmonitor.c:125: mon_backtrace+10
+ebp:0x00007b38 eip:0x00100092 args:0x00000000 0x00007b60 0xffff0000 0x00007b64 
+    kern/init/init.c:48: grade_backtrace2+33
+ebp:0x00007b58 eip:0x001000bb args:0x00000000 0xffff0000 0x00007b84 0x00000029 
+    kern/init/init.c:53: grade_backtrace1+38
+ebp:0x00007b78 eip:0x001000d9 args:0x00000000 0x00100000 0xffff0000 0x0000001d 
+    kern/init/init.c:58: grade_backtrace0+23
+ebp:0x00007b98 eip:0x001000fe args:0x001032fc 0x001032e0 0x0000130a 0x00000000 
+    kern/init/init.c:63: grade_backtrace+34
+ebp:0x00007bc8 eip:0x00100055 args:0x00000000 0x00000000 0x00000000 0x00010094 
+    kern/init/init.c:28: kern_init+84
+ebp:0x00007bf8 eip:0x00007d68 args:0xc031fcfa 0xc08ed88e 0x64e4d08e 0xfa7502a8 
+    <unknow>: -- 0x00007d67 -
+
+最深的函数调用栈ebp的值0x7bf8,为bootloader中bootmain函数的帧。
+
+
+[练习6.1] 中断向量表中一个表项占多少字节？其中哪几位代表中断处理代码的入口？
+
+中断向量表一个表项占用8字节，其中2-3字节是段选择子，0-1字节和6-7字节拼成位移，
+两者联合便是中断处理程序的入口地址。
+
+[练习6.2] 请编程完善kern/trap/trap.c中对中断向量表进行初始化的函数idt_init。
+见代码
+
+[练习6.3] 请编程完善trap.c中的中断处理函数trap，在对时钟中断进行处理的部分填写trap函数
+见代码
+
+
+[练习7]  增加syscall功能，即增加一用户态函数（可执行一特定系统调用：获得时钟计数值），
+当内核初始完毕后，可从内核态返回到用户态的函数，而用户态的函数又通过系统调用得到内核态的服务
+
+在idt_init中，将用户态调用SWITCH_TOK中断的权限打开。
+	SETGATE(idt[T_SWITCH_TOK], 1, KERNEL_CS, __vectors[T_SWITCH_TOK], 3);
+
+在trap_dispatch中，将中断时会从堆栈弹出的段寄存器进行修改
+	对TO User
+	    tf->tf_cs = USER_CS;
+	    tf->tf_ds = USER_DS;
+	    tf->tf_es = USER_DS;
+	    tf->tf_ss = USER_DS;
+	对TO Kernel
+	    tf->tf_cs = KERNEL_CS;
+	    tf->tf_ds = KERNEL_DS;
+	    tf->tf_es = KERNEL_DS;
+
+在init.c文件中做一些修改：
+在lab1_switch_to_user中，调用T_SWITCH_TOU中断。
+注意从中断返回时，会多pop两位，并用这两位的值更新ss,sp，损坏堆栈。
+所以要先把栈压下拉两位，并在从中断返回后修复esp。
+	asm volatile (
+	    "sub $0x8, %%esp \n"
+	    "int %0 \n"
+	    "movl %%ebp, %%esp"
+	    : 
+	    : "i"(T_SWITCH_TOU)
+	);
+
+在lab1_switch_to_kernel中，调用T_SWITCH_TOK中断。
+注意从中断返回时，esp仍在TSS指示的堆栈中。所以要在从中断返回后修复esp。
+	asm volatile (
+	    "int %0 \n"
+	    "movl %%ebp, %%esp \n"
+	    : 
+	    : "i"(T_SWITCH_TOK)
+	);
+
+但这样不能正常输出文本。根据提示，在trap_dispatch中转User态时，将调用io所需权限降低。
+	tf->tf_eflags |= FL_IOPL_MASK;
+
+
+
