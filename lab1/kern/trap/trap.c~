@@ -8,7 +8,7 @@
 #include <assert.h>
 #include <console.h>
 #include <kdebug.h>
-
+//#include <string.h>
 #define TICK_NUM 100
 
 static void print_ticks() {
@@ -46,7 +46,7 @@ idt_init(void) {
       *     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
       *     Notice: the argument of lidt is idt_pd. try to find it!
       */
-     extern uintptr_t__vectors[];
+     extern uintptr_t __vectors[];
      int i;
      for (i = 0; i < sizeof(idt)/sizeof(struct gatedesc); i++)
      	SETGATE(idt[i], 0, GD_KTEXT, __vectors[i], DPL_KERNEL);
@@ -139,6 +139,8 @@ print_regs(struct pushregs *regs) {
     cprintf("  ecx  0x%08x\n", regs->reg_ecx);
     cprintf("  eax  0x%08x\n", regs->reg_eax);
 }
+
+struct trapframe switchk2u, *switchu2k;
 
 /* trap_dispatch - dispatch based on what type of trap occurred */
 static void
