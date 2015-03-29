@@ -130,35 +130,34 @@ default_free_pages(struct Page *base, size_t n) {
     		break;
     }
 	//insert the page
-	for (p = base; p < base + n; p++)
-		list_add_before(le, &(p->page_link));
-	base->flags = 0;
-	set_page_ref(base, 0);
-	ClearPageProperty(base);
-	SetPageProperty(base);
-	base->property = n;
-	
-	//merge higher addr block
-	p = le2page(le, page_link);
-	if ((base + n) == p) {
-		base->property += p->property;
-		p->property = 0;
-	}
-	//merge lower addr block
-	le = list_prev(&(base->page_link));
-	p = le2page(le, page_link);
-	if (le != &free_list && p + 1 == base) {
-		while (le != &free_list) {
-			if (p->property != 0) {
-				p->property += base->property;
-				base->property = 0;
-				break;
+    for (p = base; p < base + n; p++)
+	   list_add_before(le, &(p->page_link));
+    base->flags = 0;
+    set_page_ref(base, 0);
+    ClearPageProperty(base);
+    SetPageProperty(base);
+    base->property = n;
+
+    //merge higher addr block
+    p = le2page(le, page_link);
+    if ((base + n) == p) {
+        base->property += p->property;
+        p->property = 0;
+    }
+    //merge lower addr block
+    le = list_prev(&(base->page_link));
+    p = le2page(le, page_link);
+    if (le != &free_list && p + 1 == base) {
+        while (le != &free_list) {
+            if (p->property != 0) {
+                p->property += base->property;
+                base->property = 0;
+                break;
 			}
-			le = list_prev(le);
-			p = le2page(le, page_link);
-		}
-	}
-	
+            le = list_prev(le);
+            p = le2page(le, page_link);
+        }
+    }
 	nr_free += n;
 	return;
 }
