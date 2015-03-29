@@ -106,7 +106,7 @@ default_alloc_pages(size_t n) {
             }
             //add the splitted block to free list
             if (p->property > n)
-            	(le2page(le, page_link)->property = p->property - n;
+            	(le2page(le, page_link))->property = p->property - n;
 
             SetPageReserved(p);
             ClearPageProperty(p);
@@ -145,7 +145,7 @@ default_free_pages(struct Page *base, size_t n) {
 		p->property = 0;
 	}
 	//merge lower addr block
-	le = list_pre(&(base->page_link));
+	le = list_prev(&(base->page_link));
 	p = le2page(le, page_link);
 	if (le != &free_list && p + 1 == base) {
 		while (le != &free_list) {
@@ -154,7 +154,7 @@ default_free_pages(struct Page *base, size_t n) {
 				base->property = 0;
 				break;
 			}
-			le = list_pre(&le);
+			le = list_prev(le);
 			p = le2page(le, page_link);
 		}
 	}
