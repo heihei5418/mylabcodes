@@ -3,8 +3,7 @@
 ### 计25班 姚鑫 2012011360
 
 ## 练习0
-使用`SourceGear DiffMerge`工具进行比较和合并。本次实验没有合并lab1 challenge部分的代码。
-同时对lab1中`trap.c`和lab5中`proc.c`进行了进一步的修改。
+使用`SourceGear DiffMerge`工具进行比较和合并。对lab1中`trap.c`和lab5中`proc.c`进行了进一步的修改。
 
 说明：在这里，我发现了自己lab5中有一个笔误产生的bug。
 
